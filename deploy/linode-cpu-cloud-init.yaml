@@ -13,7 +13,6 @@ write_files:
         -p 127.0.0.1:8000:8000 \
         -v /opt/vllm/hf:/root/.cache/huggingface \
         -e VLLM_CPU_KVCACHE_SPACE=3 \
-        -e VLLM_CPU_OMP_THREADS_BIND=all \
         --ipc=host --privileged=true \
         public.ecr.aws/q9t5s3a7/vllm-cpu-release-repo:v0.29.0 \
         --model Qwen/Qwen3-1.7B \
