@@ -23,6 +23,10 @@ against the same vLLM for 100 s (456 completed, 0 errors; peak KV cache 98.2 %, 
 agent read that straight from vLLM `/metrics` and switched itself to **SURGE**
 (`queue=168 ≥ 8 and kv_cache=94 % ≥ 85 %`): max_tokens 512 → 128, context 12 → 3 items, batch 1 → 8,
 non-urgent summaries deferred, urgent alerts still first. Screenshot: `docs/dashboard-gpu-surge.jpg`.
+The Night Watch run started inside that storm still finished 40/40 once the queue drained, with all
+three safety-critical alerts intact (03:12 fall first, then the confusion episode and the missed dose).
+It flagged one bathroom trip instead of two: those are borderline calls left to the model, not the
+keyword safety net, and the smaller SURGE budget made it more conservative.
 
 ![Night Watch switching to SURGE on real Akamai GPU telemetry](docs/dashboard-gpu-surge.jpg)
 
