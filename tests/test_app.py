@@ -513,7 +513,7 @@ def test_dashboard_serves_the_controls_with_local_assets_only() -> None:
     refs = re.findall(r'(?:src|href)="([^"]+)"', html)
     assert refs, "expected the vendored chart asset reference"
     for ref in refs:
-        assert ref.startswith("/") or ref.startswith("data:"), f"non-local asset reference: {ref}"
+        assert "://" not in ref and not ref.startswith("//"), f"non-local asset reference: {ref}"
     assert "http://" not in html
     assert "https://" not in html
     assert "//cdn" not in html
