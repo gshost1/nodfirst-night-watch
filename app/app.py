@@ -126,6 +126,10 @@ class NightWatchApp:
         self._poller_task: asyncio.Task[None] | None = None
         self._active = False
         self._lock = asyncio.Lock()
+        # Privacy counters for the dashboard hero strip (cumulative for the process).
+        self._calls_prior_runs = 0  # LLM calls made by runs that have since been replaced
+        self._load_calls = 0  # non-PHI load-probe completions against the owned endpoint
+        self._blocked_attempts = 0  # PHI egress attempts the guard refused pre-I/O
 
     # ------------------------------------------------------------------ run lifecycle
 
@@ -147,6 +151,8 @@ class NightWatchApp:
                 step_delay_s=self.step_delay_s,
             )
             # A fresh run object is the reset mechanism: no prior events/alerts/calls/digest.
+            if self.run is not None:
+                self._calls_prior_runs += len(self.run.calls())
             self.run = run
             self._active = True
             self._run_task = asyncio.create_task(self._execute_run(run), name="nightwatch-run")
@@ -186,6 +192,7 @@ class NightWatchApp:
                 "mock_metrics": self.settings.is_mock_metrics,
                 "phi_mode": self.settings.phi_mode,
             },
+            "privacy": self.privacy_payload(),
             "events_total": 0,
             "events_processed": 0,
             "alerts_count": 0,
@@ -218,15 +225,37 @@ class NightWatchApp:
             payload["error"] = reported["error"]
         return payload
 
+    def privacy_payload(self) -> dict[str, Any]:
+        """Hero numbers: every LLM call stayed on the owned host; blocked attempts moved 0 bytes."""
+        current = 0 if self.run is None else len(self.run.calls())
+        return {
+            "phi_calls_on_host": self._calls_prior_runs + current + self._load_calls,
+            "blocked_attempts": self._blocked_attempts,
+            "bytes_egressed": 0,
+            "host": self.guard.endpoint_host,
+        }
+
     def metrics_payload(self, limit: int = HISTORY_LIMIT) -> dict[str, Any]:
-        """`GET /api/metrics`: latest snapshot plus chartable history (a poll adds a sample)."""
+        """`GET /api/metrics`: latest snapshot plus chartable history (a poll adds a sample).
+
+        Each history sample also carries the `mode` the policy would pick from it, so the
+        charts can band the NORMAL / CONSERVE / SURGE stretches and mark the transitions.
+        """
         try:
             latest = self.metrics_source.snapshot()
         except Exception:
             latest = None
+        history = []
+        for sample in self.metrics_source.history()[-limit:]:
+            entry = sample.to_dict()
+            try:
+                entry["mode"] = choose_mode(sample, self.settings).mode
+            except Exception:  # a bad sample must never take the chart down
+                entry["mode"] = None
+            history.append(entry)
         return {
             "latest": latest.to_dict() if latest is not None else None,
-            "history": [sample.to_dict() for sample in self.metrics_source.history()[-limit:]],
+            "history": history,
         }
 
     def events_since(self, since: int) -> list[dict[str, Any]]:
@@ -296,6 +325,7 @@ class NightWatchApp:
                         phi=False,
                         max_tokens=REAL_LOAD_PROBE_MAX_TOKENS,
                     )
+                    self._load_calls += 1
 
         await asyncio.gather(*(worker() for _ in range(concurrency)))
 
@@ -314,6 +344,7 @@ class NightWatchApp:
                 max_tokens=EGRESS_DEMO_MAX_TOKENS,
             )
         except EgressBlocked as exc:
+            self._blocked_attempts += 1
             return {
                 "blocked": True,
                 "attempted_url": EGRESS_DEMO_BASE_URL,

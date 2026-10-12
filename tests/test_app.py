@@ -115,6 +115,7 @@ def test_status_exposes_the_documented_operating_state() -> None:
         "params",
         "egress",
         "flags",
+        "privacy",
         "events_total",
         "events_processed",
         "alerts_count",
@@ -138,6 +139,12 @@ def test_status_exposes_the_documented_operating_state() -> None:
         "allowlist": ["127.0.0.1", "localhost"],
         "phi_mode": True,
         "owned": False,
+    }
+    assert payload["privacy"] == {
+        "phi_calls_on_host": 0,
+        "blocked_attempts": 0,
+        "bytes_egressed": 0,
+        "host": "mock",
     }
     assert payload["events_total"] == 0
     assert payload["events_processed"] == 0
@@ -195,9 +202,10 @@ def test_metrics_endpoint_returns_latest_snapshot_and_growing_history() -> None:
     assert len(first["history"]) >= 1
     assert len(second["history"]) > len(first["history"])
     assert all(
-        {"waiting", "running", "kv_cache_pct", "ttft_p50", "tokens_per_s"} <= set(sample)
+        {"waiting", "running", "kv_cache_pct", "ttft_p50", "tokens_per_s", "mode"} <= set(sample)
         for sample in second["history"]
     )
+    assert all(sample["mode"] in {"NORMAL", "CONSERVE", "SURGE"} for sample in second["history"])
 
 
 def test_events_endpoint_honors_the_exclusive_since_cursor() -> None:

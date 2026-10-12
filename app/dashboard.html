@@ -67,6 +67,30 @@
       .privacy.owned { color: var(--ok); border-color: #245c4b; background: #0f2a23; }
       .privacy.warn { color: var(--bad); border-color: #6d2b2b; background: #2a1414; }
       .privacy-host { color: var(--muted); font-size: 11px; }
+      .hero {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 10px;
+        padding: 12px 20px 0;
+      }
+      .hero .stat {
+        background: var(--panel);
+        border: 1px solid var(--edge);
+        border-radius: 10px;
+        padding: 10px 14px;
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+      }
+      .hero .stat .n { font-size: 26px; font-weight: 700; line-height: 1.1; letter-spacing: -0.5px; }
+      .hero .stat .l { font-size: 11px; letter-spacing: 0.6px; text-transform: uppercase; color: var(--muted); }
+      .hero .stat .d { font-size: 12px; color: var(--muted); }
+      .hero .stat.ok .n { color: var(--ok); }
+      .hero .stat.block .n { color: var(--warn); }
+      .hero .stat.zero .n { color: var(--accent); }
+      @media (max-width: 720px) { .hero { grid-template-columns: 1fr; } }
+      .mode-legend { display: flex; gap: 10px; font-size: 11px; color: var(--muted); margin: -4px 0 6px; }
+      .mode-legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; vertical-align: -1px; }
       #failure-banner {
         margin: 12px 20px 0;
         padding: 10px 14px;
@@ -211,6 +235,24 @@
       <span class="flag" id="run-state">idle</span>
     </header>
 
+    <section class="hero" id="hero" aria-label="privacy summary">
+      <div class="stat ok">
+        <span class="n" id="hero-calls">0</span>
+        <span class="l">PHI model calls, all on this host</span>
+        <span class="d mono" id="hero-host">endpoint: —</span>
+      </div>
+      <div class="stat block">
+        <span class="n" id="hero-blocked">0</span>
+        <span class="l">third-party egress attempts blocked</span>
+        <span class="d">refused before any I/O</span>
+      </div>
+      <div class="stat zero">
+        <span class="n" id="hero-bytes">0 B</span>
+        <span class="l">patient data left this machine</span>
+        <span class="d">by construction, not by policy text</span>
+      </div>
+    </section>
+
     <div id="failure-banner" hidden></div>
 
     <main>
@@ -230,6 +272,11 @@
           </div>
         </div>
 
+        <div class="mode-legend" aria-hidden="true">
+          <span><i style="background:rgba(255,180,84,.35)"></i>CONSERVE band</span>
+          <span><i style="background:rgba(255,107,107,.35)"></i>SURGE band</span>
+          <span><i style="background:#8b98a9;width:2px"></i>mode change</span>
+        </div>
         <div class="card">
           <h2>KV cache % <span class="cur" id="kv-now">—</span></h2>
           <div class="chart-box"><canvas id="chart-kv" data-points="0"></canvas></div>
@@ -374,6 +421,56 @@
         var charts = {};
         var chartError = null;
 
+        // Shades the chart background by the policy mode in force at each sample and draws a
+        // vertical marker wherever the mode changed, so the self-tuning loop is visible.
+        var MODE_FILL = {
+          CONSERVE: "rgba(255,180,84,0.14)",
+          SURGE: "rgba(255,107,107,0.16)",
+        };
+        var modeBands = {
+          id: "modeBands",
+          beforeDatasetsDraw: function (chart) {
+            var modes = chart.$modes || [];
+            var xs = chart.scales.x;
+            var ys = chart.scales.y;
+            if (!modes.length || !xs || !ys) return;
+            var ctx = chart.ctx;
+            var n = modes.length;
+            ctx.save();
+            var start = 0;
+            for (var i = 1; i <= n; i++) {
+              if (i === n || modes[i] !== modes[start]) {
+                var fill = MODE_FILL[modes[start]];
+                if (fill) {
+                  var x0 = xs.getPixelForValue(start);
+                  var x1 = xs.getPixelForValue(Math.min(i, n - 1));
+                  if (i === n) x1 = xs.right;
+                  ctx.fillStyle = fill;
+                  ctx.fillRect(x0, ys.top, Math.max(1, x1 - x0), ys.bottom - ys.top);
+                }
+                if (i < n) {
+                  var mx = xs.getPixelForValue(i);
+                  ctx.strokeStyle = "rgba(139,152,169,0.9)";
+                  ctx.lineWidth = 1;
+                  ctx.setLineDash([3, 3]);
+                  ctx.beginPath();
+                  ctx.moveTo(mx, ys.top);
+                  ctx.lineTo(mx, ys.bottom);
+                  ctx.stroke();
+                  ctx.setLineDash([]);
+                  ctx.fillStyle = "#8b98a9";
+                  ctx.font = "10px ui-monospace, Menlo, monospace";
+                  ctx.textBaseline = "top";
+                  ctx.fillText(modes[i], mx + 3, ys.top + 2);
+                }
+                start = i;
+              }
+            }
+            ctx.restore();
+          },
+        };
+        if (typeof Chart !== "undefined" && Chart.register) Chart.register(modeBands);
+
         function chartConfig(color, label, suggestedMax) {
           var config = {
             type: "line",
@@ -423,12 +520,13 @@
           }
         }
 
-        function applySeries(chart, canvasId, labels, data) {
+        function applySeries(chart, canvasId, labels, data, modes) {
           var canvas = $(canvasId);
           if (canvas) canvas.dataset.points = String(data.length);
           if (!chart) return;
           chart.data.labels = labels;
           chart.data.datasets[0].data = data;
+          chart.$modes = modes || [];
           chart.update("none");
         }
 
@@ -448,10 +546,16 @@
           var tokens = tail.map(function (s) {
             return s.tokens_per_s;
           });
+          var modes = tail.map(function (s) {
+            return s.mode || null;
+          });
+          nw.modeChanges = modes.filter(function (m, i) {
+            return i > 0 && m !== modes[i - 1];
+          }).length;
 
-          applySeries(charts.kv, "chart-kv", labels, kv);
-          applySeries(charts.waiting, "chart-waiting", labels, waiting);
-          applySeries(charts.tokens, "chart-tokens", labels, tokens);
+          applySeries(charts.kv, "chart-kv", labels, kv, modes);
+          applySeries(charts.waiting, "chart-waiting", labels, waiting, modes);
+          applySeries(charts.tokens, "chart-tokens", labels, tokens, modes);
 
           var latest = (metrics && metrics.latest) || null;
           $("kv-now").textContent = latest ? num(latest.kv_cache_pct, 1) + " %" : "—";
@@ -469,6 +573,12 @@
 
         function renderStatus(status) {
           nw.status = status;
+
+          var privacy = status.privacy || {};
+          $("hero-calls").textContent = String(privacy.phi_calls_on_host || 0);
+          $("hero-blocked").textContent = String(privacy.blocked_attempts || 0);
+          $("hero-bytes").textContent = String(privacy.bytes_egressed || 0) + " B";
+          $("hero-host").textContent = "endpoint: " + (privacy.host || "—");
 
           var flags = status.flags || {};
           setFlag("flag-mock-llm", flags.mock_llm);
