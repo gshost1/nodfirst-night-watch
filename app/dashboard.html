@@ -7,7 +7,7 @@
     <!-- Empty data: URI icon so the page never asks the network for a favicon. -->
     <link rel="icon" href="data:," />
     <!-- Vendored Chart.js 4.5.1 (offline): served from app/static/chart.umd.js. -->
-    <script src="/static/chart.umd.js"></script>
+    <script src="static/chart.umd.js"></script>
     <style>
       :root {
         --bg: #0b1016;
@@ -852,7 +852,7 @@
         }
 
         function startRun() {
-          fetch("/api/run", { method: "POST" })
+          fetch("api/run", { method: "POST" })
             .then(function (res) {
               return res
                 .json()
@@ -879,7 +879,7 @@
         }
 
         function simulateLoad() {
-          fetch("/api/simulate-load", {
+          fetch("api/simulate-load", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ duration_s: 30, intensity: 1.0 }),
@@ -918,7 +918,7 @@
           box.hidden = false;
           box.className = "egress pending";
           box.textContent = "attempting a PHI completion against api.openai.com …";
-          fetch("/api/egress-demo", { method: "POST" })
+          fetch("api/egress-demo", { method: "POST" })
             .then(function (res) {
               return res.json();
             })
@@ -940,11 +940,11 @@
           if (nw.busy) return Promise.resolve();
           nw.busy = true;
           nw.ticks += 1;
-          return Promise.all([getJSON("/api/status"), getJSON("/api/metrics")])
+          return Promise.all([getJSON("api/status"), getJSON("api/metrics")])
             .then(function (pair) {
               renderStatus(pair[0]);
               renderMetrics(pair[1]);
-              return getJSON("/api/events?since=" + nw.eventsCursor);
+              return getJSON("api/events?since=" + nw.eventsCursor);
             })
             .then(function (events) {
               if (events.length) {
@@ -953,9 +953,9 @@
                 renderEvents(events);
               }
               return Promise.all([
-                getJSON("/api/alerts"),
-                getJSON("/api/calls"),
-                getJSON("/api/digest"),
+                getJSON("api/alerts"),
+                getJSON("api/calls"),
+                getJSON("api/digest"),
               ]);
             })
             .then(function (rest) {

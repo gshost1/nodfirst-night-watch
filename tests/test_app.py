@@ -506,7 +506,7 @@ def test_dashboard_serves_the_controls_with_local_assets_only() -> None:
         assert f'id="{element_id}"' in html, f"missing dashboard element: #{element_id}"
 
     # The polling layer drives all three documented endpoints, plus the panel feeds.
-    for path in ("/static/chart.umd.js", "/api/status", "/api/metrics", "/api/events?since="):
+    for path in ("static/chart.umd.js", "api/status", "api/metrics", "api/events?since="):
         assert path in html, f"dashboard does not reference {path}"
 
     # Offline guarantee: every asset reference is local or a data: URI, no absolute URL anywhere.
