@@ -269,6 +269,26 @@
       #call-log td.num, #call-log th.num { text-align: right; font-family: ui-monospace, "SF Mono", Menlo, monospace; }
       .table-wrap { max-height: 300px; overflow-y: auto; }
       .err { color: var(--bad); }
+      .model-chip { font-size: 11px; color: var(--muted); border: 1px solid var(--edge); border-radius: 999px; padding: 2px 10px; max-width: 100%; overflow-wrap: anywhere; }
+      .model-chip:empty { display: none; }
+      ol.tl { list-style: none; margin: 0; padding: 0; }
+      ol.tl li { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline; padding: 7px 0; border-top: 1px solid var(--edge); font-size: 12px; }
+      ol.tl li:first-child { border-top: 0; }
+      ol.tl .t { color: var(--faint); font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+      ol.tl .m { font-weight: 650; }
+      ol.tl .r { color: var(--muted); flex: 1 1 100%; }
+      .m-normal { color: var(--mode-normal); } .m-conserve { color: var(--mode-conserve); } .m-surge { color: var(--mode-surge); }
+      .empty { color: var(--faint); font-size: 12px; }
+      .econ-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin-bottom: 12px; }
+      .econ-grid div { border: 1px solid var(--edge); border-radius: 10px; padding: 8px 10px; }
+      .econ-grid b { display: block; font-size: 18px; letter-spacing: -0.02em; }
+      .econ-grid span { font-size: 10.5px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
+      #econ-modes { width: 100%; border-collapse: collapse; font-size: 12px; }
+      #econ-modes th, #econ-modes td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--edge); }
+      #econ-modes th { color: var(--muted); font-size: 10.5px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; }
+      #econ-modes td.num, #econ-modes th.num { text-align: right; }
+      .econ-note { margin-top: 10px; font-size: 12px; color: var(--ok); }
+      @media (max-width: 720px) { .econ-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
       .counters { display: flex; gap: 16px; flex-wrap: wrap; color: var(--muted); font-size: 12px; }
       .counters b { color: var(--ink); font-weight: 600; }
       footer { padding: 0 24px 28px; color: var(--faint); font-size: 11px; }
@@ -286,6 +306,7 @@
       </div>
       <span class="privacy neutral" id="privacy-badge">MOCK — no egress possible</span>
       <span class="privacy-host mono" id="privacy-host"></span>
+      <span class="model-chip mono" id="model-chip"></span>
       <span class="flag" id="run-state">idle</span>
     </header>
 
@@ -330,6 +351,24 @@
           <span><i style="background:rgba(255,180,84,.35)"></i>CONSERVE band</span>
           <span><i style="background:rgba(255,107,107,.35)"></i>SURGE band</span>
           <span><i style="background:#8b98a9;width:2px"></i>mode change</span>
+        </div>
+        <div class="card" id="timeline-card">
+          <h2>Self-tuning timeline <span class="cur" id="timeline-count">0 transitions</span></h2>
+          <ol class="tl" id="timeline"></ol>
+        </div>
+        <div class="card" id="econ-card">
+          <h2>Inference economics <span class="cur" id="econ-state">0 calls</span></h2>
+          <div class="econ-grid">
+            <div><b id="econ-calls">0</b><span>calls</span></div>
+            <div><b id="econ-prompt">0</b><span>prompt tokens</span></div>
+            <div><b id="econ-completion">0</b><span>completion tokens</span></div>
+            <div><b id="econ-latency">—</b><span>avg latency ms</span></div>
+          </div>
+          <table id="econ-modes">
+            <thead><tr><th>mode</th><th class="num">calls</th><th class="num">avg completion tokens / call</th></tr></thead>
+            <tbody></tbody>
+          </table>
+          <div class="econ-note">$0 per night to a third-party API — inference is on our own GPU.</div>
         </div>
         <div class="card">
           <h2>KV cache % <span class="cur" id="kv-now">—</span></h2>
@@ -611,10 +650,58 @@
           applySeries(charts.waiting, "chart-waiting", labels, waiting, modes);
           applySeries(charts.tokens, "chart-tokens", labels, tokens, modes);
 
+          renderTimeline((metrics && metrics.transitions) || []);
+
           var latest = (metrics && metrics.latest) || null;
           $("kv-now").textContent = latest ? num(latest.kv_cache_pct, 1) + " %" : "—";
           $("waiting-now").textContent = latest ? num(latest.waiting, 1) : "—";
           $("tokens-now").textContent = latest ? num(latest.tokens_per_s, 1) + " tok/s" : "—";
+        }
+
+        function renderTimeline(items) {
+          var list = $("timeline");
+          list.innerHTML = "";
+          items.slice(0, 8).forEach(function (t) {
+            var li = document.createElement("li");
+            li.innerHTML =
+              '<span class="t">' + esc(clockText(t.at)) + "</span>" +
+              '<span class="m"><span class="m-' + esc(String(t.from).toLowerCase()) + '">' + esc(t.from) +
+              '</span> → <span class="m-' + esc(String(t.to).toLowerCase()) + '">' + esc(t.to) + "</span></span>" +
+              '<span class="r">' + esc(t.reason) + "</span>";
+            list.appendChild(li);
+          });
+          if (!items.length) {
+            list.innerHTML = '<li class="empty">No mode transitions yet — policy is steady.</li>';
+          }
+          $("timeline-count").textContent = items.length + " transition" + (items.length === 1 ? "" : "s");
+        }
+
+        function renderEconomics(calls) {
+          var prompt = 0, completion = 0, latency = 0, byMode = {};
+          calls.forEach(function (c) {
+            prompt += Number(c.prompt_tokens) || 0;
+            completion += Number(c.completion_tokens) || 0;
+            latency += Number(c.latency_ms) || 0;
+            var m = c.mode || "—";
+            var g = byMode[m] || (byMode[m] = { n: 0, comp: 0 });
+            g.n += 1;
+            g.comp += Number(c.completion_tokens) || 0;
+          });
+          $("econ-calls").textContent = String(calls.length);
+          $("econ-prompt").textContent = String(prompt);
+          $("econ-completion").textContent = String(completion);
+          $("econ-latency").textContent = calls.length ? String(Math.round(latency / calls.length)) : "—";
+          $("econ-state").textContent = calls.length + " calls";
+          var tbody = document.querySelector("#econ-modes tbody");
+          tbody.innerHTML = "";
+          Object.keys(byMode).sort().forEach(function (m) {
+            var g = byMode[m];
+            var tr = document.createElement("tr");
+            tr.innerHTML =
+              '<td class="m-' + esc(m.toLowerCase()) + '">' + esc(m) + '</td><td class="num">' + g.n +
+              '</td><td class="num">' + (g.comp / g.n).toFixed(1) + "</td>";
+            tbody.appendChild(tr);
+          });
         }
 
         // ------------------------------------------------------------------ status
@@ -633,6 +720,19 @@
           $("hero-blocked").textContent = String(privacy.blocked_attempts || 0);
           $("hero-bytes").textContent = String(privacy.bytes_egressed || 0) + " B";
           $("hero-host").textContent = "endpoint: " + (privacy.host || "—");
+          var chip = $("model-chip");
+          chip.textContent = status.model
+            ? "model " + status.model + (privacy.host ? " @ " + privacy.host : "")
+            : "";
+          // After a reload the click-result is gone but the server still counts attempts.
+          if ((privacy.blocked_attempts || 0) > 0 && !nw.egress) {
+            var seen = $("egress-result");
+            seen.className = "egress blocked";
+            seen.dataset.blocked = "true";
+            seen.textContent =
+              privacy.blocked_attempts + " blocked attempt(s) this session" +
+              (privacy.last_blocked_host ? " — last host: " + privacy.last_blocked_host : "");
+          }
 
           var flags = status.flags || {};
           setFlag("flag-mock-llm", flags.mock_llm);
@@ -807,6 +907,7 @@
             tbody.appendChild(tr);
           });
           $("calls-state").textContent = calls.length + " calls";
+          renderEconomics(calls);
           $("counter-calls").textContent = String(calls.length);
         }
 

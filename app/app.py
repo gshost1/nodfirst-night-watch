@@ -130,6 +130,7 @@ class NightWatchApp:
         self._calls_prior_runs = 0  # LLM calls made by runs that have since been replaced
         self._load_calls = 0  # non-PHI load-probe completions against the owned endpoint
         self._blocked_attempts = 0  # PHI egress attempts the guard refused pre-I/O
+        self._last_blocked_host: str | None = None
 
     # ------------------------------------------------------------------ run lifecycle
 
@@ -141,6 +142,16 @@ class NightWatchApp:
     async def start_run(self) -> tuple[NightWatchRun | None, str | None]:
         """Start a fresh run unless one is active; returns `(run, conflict_reason)`."""
         async with self._lock:
+            # The worker thread marks the run done/failed just before `_execute_run`
+            # clears `_active`; once status reports a terminal state, a new run must be
+            # accepted, so wait out that hand-off instead of answering 409.
+            if (
+                self._active
+                and self.run is not None
+                and self.run.run_state in ("done", "failed")
+                and self._run_task is not None
+            ):
+                await asyncio.shield(self._run_task)
             if self._active:
                 active_id = self.run.run_id if self.run is not None else "unknown"
                 return None, f"night-watch run {active_id} is already active"
@@ -197,6 +208,7 @@ class NightWatchApp:
             "events_processed": 0,
             "alerts_count": 0,
             "digest_ready": False,
+            "model": self.settings.llm_model,
         }
         run = self.run
         if run is None:
@@ -233,6 +245,7 @@ class NightWatchApp:
             "blocked_attempts": self._blocked_attempts,
             "bytes_egressed": 0,
             "host": self.guard.endpoint_host,
+            "last_blocked_host": self._last_blocked_host,
         }
 
     def metrics_payload(self, limit: int = HISTORY_LIMIT) -> dict[str, Any]:
@@ -246,16 +259,32 @@ class NightWatchApp:
         except Exception:
             latest = None
         history = []
+        transitions: list[dict[str, Any]] = []
+        previous: str | None = None
         for sample in self.metrics_source.history()[-limit:]:
             entry = sample.to_dict()
             try:
-                entry["mode"] = choose_mode(sample, self.settings).mode
+                decision = choose_mode(sample, self.settings)
+                entry["mode"] = decision.mode
             except Exception:  # a bad sample must never take the chart down
+                decision = None
                 entry["mode"] = None
+            if decision is not None:
+                if previous is not None and decision.mode != previous:
+                    transitions.append(
+                        {
+                            "at": entry.get("collected_at"),
+                            "from": previous,
+                            "to": decision.mode,
+                            "reason": decision.reason,
+                        }
+                    )
+                previous = decision.mode
             history.append(entry)
         return {
             "latest": latest.to_dict() if latest is not None else None,
             "history": history,
+            "transitions": transitions[-8:][::-1],  # newest first
         }
 
     def events_since(self, since: int) -> list[dict[str, Any]]:
@@ -345,6 +374,7 @@ class NightWatchApp:
             )
         except EgressBlocked as exc:
             self._blocked_attempts += 1
+            self._last_blocked_host = str(exc.as_dict().get("host") or "") or None
             return {
                 "blocked": True,
                 "attempted_url": EGRESS_DEMO_BASE_URL,

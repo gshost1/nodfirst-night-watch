@@ -120,6 +120,7 @@ def test_status_exposes_the_documented_operating_state() -> None:
         "events_processed",
         "alerts_count",
         "digest_ready",
+        "model",
     }
     assert payload["run_state"] == "idle"
     assert payload["running"] is False
@@ -145,6 +146,7 @@ def test_status_exposes_the_documented_operating_state() -> None:
         "blocked_attempts": 0,
         "bytes_egressed": 0,
         "host": "mock",
+        "last_blocked_host": None,
     }
     assert payload["events_total"] == 0
     assert payload["events_processed"] == 0
@@ -280,7 +282,11 @@ def test_a_new_run_resets_the_prior_run_state() -> None:
             first_digest = (await client.get("/api/digest")).json()
             first_calls = (await client.get("/api/calls")).json()
 
-            second = (await client.post("/api/run")).json()
+            # Status says "done", so a new run must be accepted (not a 409 from the
+            # thread -> event-loop hand-off still clearing the active flag).
+            second_response = await client.post("/api/run")
+            assert second_response.status_code == 200, second_response.text
+            second = second_response.json()
             early_digest = (await client.get("/api/digest")).json()
             early_events = (await client.get("/api/events", params={"since": 0})).json()
             await _wait_for_run_state(client, "done")
@@ -308,6 +314,31 @@ def test_a_new_run_resets_the_prior_run_state() -> None:
     )
     assert result["final_digest"]["ready"] is True
     assert result["final_digest"]["header"] == result["first_digest"]["header"]
+
+
+def test_run_is_accepted_as_soon_as_status_reports_done(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Widen the gap between the worker thread finishing (run_state="done") and the
+    # event loop clearing the active flag, so the old 409 race reproduces every time.
+    real_to_thread = asyncio.to_thread
+
+    async def slow_handoff(func: Any, /, *args: Any, **kwargs: Any) -> Any:
+        result = await real_to_thread(func, *args, **kwargs)
+        await asyncio.sleep(0.3)
+        return result
+
+    monkeypatch.setattr(asyncio, "to_thread", slow_handoff)
+    app = create_app(settings=_settings(), step_delay_s=0.0)
+
+    async def scenario() -> httpx.Response:
+        async with _client(app) as client:
+            assert (await client.post("/api/run")).status_code == 200
+            await _wait_for_run_state(client, "done")
+            return await client.post("/api/run")
+
+    response = asyncio.run(scenario())
+
+    assert response.status_code == 200, response.text
+    assert response.json()["started"] is True
 
 
 def test_egress_demo_blocks_before_any_network_io(monkeypatch: pytest.MonkeyPatch) -> None:
