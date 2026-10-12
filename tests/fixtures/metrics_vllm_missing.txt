@@ -1,0 +1,12 @@
+# Variant exposition: some vLLM metric names simply absent.
+# Only waiting and the gpu cache gauge are exposed; running, TTFT and the
+# generation counter are missing -> those fields stay None.
+# HELP vllm:num_requests_waiting Number of requests waiting to be processed.
+# TYPE vllm:num_requests_waiting gauge
+vllm:num_requests_waiting 0.0
+# HELP vllm:gpu_cache_usage_perc Percentage of GPU cache blocks currently in use.
+# TYPE vllm:gpu_cache_usage_perc gauge
+vllm:gpu_cache_usage_perc 0.25
+# HELP vllm:cache_config_info Information of the KV cache configuration.
+# TYPE vllm:cache_config_info gauge
+vllm:cache_config_info 1.0

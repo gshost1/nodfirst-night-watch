@@ -1,0 +1,13 @@
+# Variant exposition: names renamed or missing (as across vLLM versions).
+# - kv cache exposed as the fallback name vllm:kv_cache_usage_perc (no gpu_cache_usage_perc)
+# - running and the TTFT histogram are absent -> those fields stay None
+# - generation counter in the bare `X` form with no TYPE line (parser keeps the bare name)
+# - a `_created` companion sample is present and must be ignored
+# HELP vllm:num_requests_waiting Number of requests waiting to be processed.
+# TYPE vllm:num_requests_waiting gauge
+vllm:num_requests_waiting 1.0
+# HELP vllm:kv_cache_usage_perc Percentage of KV cache blocks currently in use.
+# TYPE vllm:kv_cache_usage_perc gauge
+vllm:kv_cache_usage_perc 0.71
+vllm:request_generation_tokens 100.0
+vllm:request_generation_tokens_created 1700000000.123
