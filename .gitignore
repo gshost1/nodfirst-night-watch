@@ -1,5 +1,8 @@
 # secrets / local env
 .env
+# local copies of the real env (e.g. .env.onsite kept during the on-site swap)
+.env.*
+!.env.example
 
 # python
 .venv/
