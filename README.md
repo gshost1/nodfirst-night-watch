@@ -18,6 +18,14 @@ same agent stepped SURGE → CONSERVE). Screenshot: `docs/dashboard-gpu.jpg`.
 
 ![Night Watch on the Akamai GPU](docs/dashboard-gpu.jpg)
 
+**Real GPU under stress:** `scripts/gpu_stress.py` held 192 concurrent long, non-PHI completions
+against the same vLLM for 100 s (456 completed, 0 errors; peak KV cache 98.2 %, 181 waiting). The
+agent read that straight from vLLM `/metrics` and switched itself to **SURGE**
+(`queue=168 ≥ 8 and kv_cache=94 % ≥ 85 %`): max_tokens 512 → 128, context 12 → 3 items, batch 1 → 8,
+non-urgent summaries deferred, urgent alerts still first. Screenshot: `docs/dashboard-gpu-surge.jpg`.
+
+![Night Watch switching to SURGE on real Akamai GPU telemetry](docs/dashboard-gpu-surge.jpg)
+
 It owns its inference in three visible ways: a **PHI egress guardrail**, a **self-tuning loop**
 driven by the agent's own vLLM telemetry, and a **live inference dashboard**. Nothing leaves the
 machine, and every step is deterministic offline in mock mode.
