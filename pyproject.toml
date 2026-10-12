@@ -1,0 +1,38 @@
+[project]
+name = "akamai-nightwatch"
+version = "0.1.0"
+description = "Nod First Private Night Watch — owned-inference elder-care agent (mock-first)"
+requires-python = ">=3.12"
+dependencies = [
+    "openai==3.29.0",
+    "fastapi==0.143.0",
+    "uvicorn==0.54.0",
+    "httpx==0.28.1",
+    "prometheus-client==0.26.0",
+    "python-dotenv==1.2.4",
+    "pydantic==2.14.1",
+    # Hard pin: mcp 2.x removed mcp.server.fastmcp.FastMCP (1.30.0 verified).
+    "mcp>=1,<2",
+]
+
+[dependency-groups]
+dev = [
+    "pytest==9.1.1",
+    "ruff==0.17.0",
+]
+
+[tool.uv]
+# Flat top-level packages (core/, inference/, ...): nothing to build or install.
+package = false
+
+[tool.pytest.ini_options]
+# Flat layout: repo root on sys.path so `import core.llm` works from tests.
+pythonpath = ["."]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
