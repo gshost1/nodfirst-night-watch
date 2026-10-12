@@ -182,6 +182,21 @@ def matched_safety_keywords(event: Event) -> list[str]:
     return [keyword for keyword in SAFETY_KEYWORDS if keyword in haystack]
 
 
+def fast_lane_classification(event: Event) -> Classification | None:
+    """Deterministic, model-free verdict: urgent when the safety net matches, else None."""
+    matched = matched_safety_keywords(event)
+    if not matched:
+        return None
+    words = ", ".join(f"'{keyword}'" for keyword in matched)
+    return Classification(
+        urgency="urgent",
+        rationale=(
+            f"fast lane: safety net matched {words} \u2014 alert raised before the model, "
+            "model detail follows"
+        ),
+    )
+
+
 def normalize_payload(payload: Any) -> tuple[Urgency, str]:
     """Coerce a model payload into a valid label plus a non-empty rationale."""
     label = ""

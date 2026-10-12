@@ -56,6 +56,7 @@ from nightwatch.classify import (
     CLASSIFY_MAX_TOKENS,
     Classification,
     EventClassifier,
+    fast_lane_classification,
     matched_safety_keywords,
 )
 from nightwatch.dataset import Event, generate_events
@@ -397,6 +398,8 @@ class NightWatchRun:
         self._decision: ModeDecision | None = None
         self._processed: list[ProcessedEvent] = []
         self._alerts: list[ProcessedEvent] = []
+        self._alert_meta: dict[str, dict[str, Any]] = {}
+        self._t0 = time.perf_counter()
         self._calls: list[CallLogEntry] = []
         self._deferred_ids: list[str] = []
         self._digest: Digest | None = None
@@ -441,7 +444,10 @@ class NightWatchRun:
     def _execute(self) -> Digest:
         if self._settings.mock_fail_run and self._settings.is_mock_llm:
             raise MockFailRunError(MOCK_FAIL_RUN_MESSAGE)
+        self._t0 = time.perf_counter()
+        self._fast_lane()
         classifications = self._classify_all()
+        self._retract_overruled_fast_lane(classifications)
         ordered = order_for_processing(self._events, classifications)
         self._process(ordered)
         return self._build_digest()
@@ -499,8 +505,10 @@ class NightWatchRun:
                 "text": event.text,
                 "summary": event.summary,
                 "rationale": event.rationale,
+                "fast_lane": self._alert_meta.get(event.id, {}).get("fast_lane", False),
+                "raised_ms": self._alert_meta.get(event.id, {}).get("raised_ms"),
             }
-            for number, event in enumerate(self._alerts)
+            for number, event in enumerate(list(self._alerts))
         ]
 
     def calls(self) -> list[dict[str, Any]]:
@@ -527,6 +535,61 @@ class NightWatchRun:
             decision = choose_mode(snapshot, self._settings)
         self._decision = decision
         return decision
+
+    def _fast_lane(self) -> None:
+        """Raise safety-net alerts before any LLM call so time-to-alert ignores GPU load."""
+        fast: list[ProcessedEvent] = []
+        for event in self._events:
+            verdict = fast_lane_classification(event)
+            if verdict is None:
+                continue
+            fast.append(
+                ProcessedEvent(
+                    id=event.id,
+                    timestamp=event.timestamp,
+                    source=event.source,
+                    kind=event.kind,
+                    text=event.text,
+                    urgency="urgent",
+                    rationale=verdict.rationale,
+                    summary=event.text,
+                )
+            )
+        fast.sort(key=lambda item: (severity_rank(item, "urgent"), item.timestamp))  # type: ignore[arg-type]
+        raised_ms = round((time.perf_counter() - self._t0) * 1000)
+        for item in fast:
+            self._alert_meta[item.id] = {"fast_lane": True, "raised_ms": raised_ms}
+            self._alerts.append(item)
+
+    def _retract_overruled_fast_lane(self, classifications: Sequence[Classification]) -> None:
+        """Drop a fast-lane alert the authoritative verdict does not call urgent.
+
+        Unreachable with the real classifier (its safety net forces urgent on the same
+        keywords); it keeps the final classification the single source of truth.
+        """
+        overruled = {
+            event.id
+            for event, verdict in zip(self._events, classifications, strict=True)
+            if verdict.urgency != "urgent"
+        }
+        if overruled & {alert.id for alert in self._alerts}:
+            self._alerts = [alert for alert in self._alerts if alert.id not in overruled]
+
+    def _publish_alert(self, processed: ProcessedEvent) -> None:
+        """Add an alert, or enrich the fast-lane alert of the same event id in place."""
+        alerts = list(self._alerts)
+        for position, existing in enumerate(alerts):
+            if existing.id == processed.id:
+                alerts[position] = processed
+                break
+        else:
+            alerts.append(processed)
+            self._alert_meta[processed.id] = {
+                "fast_lane": False,
+                "raised_ms": round((time.perf_counter() - self._t0) * 1000),
+            }
+        alerts.sort(key=lambda item: (severity_rank(item, "urgent"), item.timestamp))  # type: ignore[arg-type]
+        self._alerts = alerts
 
     def _classify_all(self) -> list[Classification]:
         """Classify every event with fixed, mode-independent params (one phase)."""
@@ -680,7 +743,7 @@ class NightWatchRun:
             )
             self._processed.append(processed)
             if processed.urgency == "urgent":
-                self._alerts.append(processed)  # emitted the moment it is processed
+                self._publish_alert(processed)  # enriches the fast-lane alert in place
 
     def _build_digest(self) -> Digest:
         """One overview call, then the deterministic digest document."""
