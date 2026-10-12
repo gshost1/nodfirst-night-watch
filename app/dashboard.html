@@ -1,0 +1,892 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Night Watch — owned-inference dashboard</title>
+    <!-- Empty data: URI icon so the page never asks the network for a favicon. -->
+    <link rel="icon" href="data:," />
+    <!-- Vendored Chart.js 4.5.1 (offline): served from app/static/chart.umd.js. -->
+    <script src="/static/chart.umd.js"></script>
+    <style>
+      :root {
+        --bg: #0b1016;
+        --panel: #121a24;
+        --panel-2: #0f1620;
+        --edge: #22303f;
+        --ink: #e6edf5;
+        --muted: #8b98a9;
+        --ok: #4dd4ac;
+        --warn: #ffb454;
+        --bad: #ff6b6b;
+        --accent: #7aa2ff;
+        --mode-normal: #4dd4ac;
+        --mode-conserve: #ffb454;
+        --mode-surge: #ff6b6b;
+      }
+      * { box-sizing: border-box; }
+      [hidden] { display: none !important; }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--ink);
+        font: 14px/1.45 -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      }
+      code, .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+      header {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 10px 14px;
+        padding: 14px 20px;
+        border-bottom: 1px solid var(--edge);
+        background: linear-gradient(180deg, #131c27, #0d141d);
+      }
+      h1 { margin: 0; font-size: 19px; letter-spacing: 0.3px; }
+      h1 .sub { color: var(--muted); font-size: 12px; font-weight: 400; margin-left: 8px; }
+      .spacer { flex: 1 1 auto; }
+      .badges { display: flex; flex-wrap: wrap; gap: 6px; }
+      .flag {
+        border: 1px solid var(--edge);
+        border-radius: 999px;
+        padding: 3px 10px;
+        font-size: 11px;
+        letter-spacing: 0.6px;
+        color: var(--muted);
+        background: var(--panel-2);
+      }
+      .flag.on { color: var(--warn); border-color: #6b5326; background: #241c0e; }
+      .privacy {
+        border-radius: 999px;
+        padding: 4px 12px;
+        font-size: 12px;
+        font-weight: 600;
+        border: 1px solid var(--edge);
+      }
+      .privacy.neutral { color: var(--muted); background: var(--panel-2); }
+      .privacy.owned { color: var(--ok); border-color: #245c4b; background: #0f2a23; }
+      .privacy.warn { color: var(--bad); border-color: #6d2b2b; background: #2a1414; }
+      .privacy-host { color: var(--muted); font-size: 11px; }
+      #failure-banner {
+        margin: 12px 20px 0;
+        padding: 10px 14px;
+        border: 1px solid #6d2b2b;
+        border-left: 4px solid var(--bad);
+        border-radius: 8px;
+        background: #2a1414;
+        color: #ffd9d9;
+        font-weight: 600;
+      }
+      main {
+        display: grid;
+        grid-template-columns: minmax(340px, 1fr) minmax(420px, 1.15fr);
+        gap: 16px;
+        padding: 16px 20px 30px;
+        align-items: start;
+      }
+      @media (max-width: 980px) { main { grid-template-columns: 1fr; } }
+      .col { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+      .card {
+        background: var(--panel);
+        border: 1px solid var(--edge);
+        border-radius: 10px;
+        padding: 12px 14px;
+      }
+      .card h2 {
+        margin: 0 0 8px;
+        font-size: 12px;
+        text-transform: uppercase;
+        letter-spacing: 0.9px;
+        color: var(--muted);
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
+        gap: 8px;
+      }
+      .card h2 .cur { font-size: 13px; color: var(--ink); letter-spacing: 0; text-transform: none; }
+      .chart-box { position: relative; height: 132px; }
+      .mode-card { display: flex; flex-direction: column; gap: 8px; }
+      .mode-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+      #mode-badge {
+        font-size: 15px;
+        font-weight: 700;
+        letter-spacing: 1px;
+        padding: 4px 14px;
+        border-radius: 8px;
+        border: 1px solid var(--edge);
+        color: #06231a;
+        background: var(--mode-normal);
+      }
+      #mode-badge.mode-conserve { background: var(--mode-conserve); color: #2a1c05; }
+      #mode-badge.mode-surge { background: var(--mode-surge); color: #2a0808; }
+      #mode-badge.mode-normal { background: var(--mode-normal); color: #06231a; }
+      #mode-reason { color: var(--ink); }
+      #mode-params { color: var(--muted); font-size: 12px; }
+      .controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+      button {
+        font: inherit;
+        font-weight: 600;
+        color: var(--ink);
+        background: #1b2735;
+        border: 1px solid #2d3d50;
+        border-radius: 8px;
+        padding: 8px 14px;
+        cursor: pointer;
+      }
+      button:hover:not(:disabled) { background: #223143; }
+      button:disabled { opacity: 0.5; cursor: not-allowed; }
+      #btn-egress { border-color: #6d2b2b; background: #2a1414; }
+      #control-msg { font-size: 12px; color: var(--muted); margin-top: 8px; min-height: 16px; }
+      #control-msg.ok { color: var(--ok); }
+      #control-msg.warn { color: var(--warn); }
+      .egress {
+        border-radius: 8px;
+        padding: 10px 12px;
+        font-size: 13px;
+        border: 1px solid var(--edge);
+        background: var(--panel-2);
+        color: var(--muted);
+      }
+      .egress.blocked { border-color: #6d2b2b; background: #2a1414; color: #ffd9d9; }
+      .egress.pending { border-color: #4a3a1f; color: var(--warn); }
+      ul.feed { list-style: none; margin: 0; padding: 0; max-height: 280px; overflow-y: auto; }
+      ul.feed li {
+        border-top: 1px solid #1b2530;
+        padding: 7px 2px;
+        display: grid;
+        grid-template-columns: 52px 78px 1fr;
+        gap: 8px;
+        align-items: baseline;
+      }
+      ul.feed li:first-child { border-top: 0; }
+      .t { color: var(--muted); font-family: ui-monospace, Menlo, monospace; font-size: 12px; }
+      .tag {
+        font-size: 10px;
+        text-transform: uppercase;
+        letter-spacing: 0.6px;
+        border-radius: 4px;
+        padding: 1px 6px;
+        border: 1px solid var(--edge);
+        color: var(--muted);
+        justify-self: start;
+      }
+      .tag.urgent, .tag.possible_fall { color: var(--bad); border-color: #6d2b2b; background: #2a1414; }
+      .tag.attention { color: var(--warn); border-color: #6b5326; }
+      .tag.routine { color: var(--muted); }
+      .body .text { display: block; }
+      .body .summary { display: block; color: var(--muted); font-size: 12px; margin-top: 2px; }
+      .body .why { display: block; color: #6f7d8f; font-size: 11px; margin-top: 2px; }
+      .alert-item { border-left: 3px solid var(--bad); }
+      .alert-item .rank { color: var(--bad); font-weight: 700; }
+      .digest-header { font-weight: 600; margin-bottom: 6px; }
+      .digest-overview { color: var(--muted); margin-bottom: 10px; }
+      .digest-section { margin-top: 10px; }
+      .digest-section h3 { margin: 0 0 4px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.8px; color: var(--muted); }
+      .digest-section ul { margin: 0; padding-left: 18px; }
+      .digest-task strong { color: var(--accent); }
+      .deferred { margin-top: 10px; font-size: 12px; color: var(--warn); }
+      #call-log { width: 100%; border-collapse: collapse; font-size: 12px; }
+      #call-log th, #call-log td { text-align: left; padding: 4px 6px; border-bottom: 1px solid #1b2530; }
+      #call-log th { color: var(--muted); font-weight: 500; position: sticky; top: 0; background: var(--panel); }
+      #call-log td.num, #call-log th.num { text-align: right; font-family: ui-monospace, Menlo, monospace; }
+      .table-wrap { max-height: 300px; overflow-y: auto; }
+      .err { color: var(--bad); }
+      .counters { display: flex; gap: 14px; flex-wrap: wrap; color: var(--muted); font-size: 12px; }
+      .counters b { color: var(--ink); }
+      footer { padding: 0 20px 24px; color: #5f6b7a; font-size: 11px; }
+      #conn.bad { color: var(--bad); }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>Night Watch<span class="sub">owned-inference caregiver agent</span></h1>
+      <div class="spacer"></div>
+      <div class="badges" id="flag-badges">
+        <span class="flag" id="flag-mock-llm">MOCK LLM</span>
+        <span class="flag" id="flag-mock-metrics">MOCK METRICS</span>
+        <span class="flag" id="flag-phi">PHI MODE</span>
+      </div>
+      <span class="privacy neutral" id="privacy-badge">MOCK — no egress possible</span>
+      <span class="privacy-host mono" id="privacy-host"></span>
+      <span class="flag" id="run-state">idle</span>
+    </header>
+
+    <div id="failure-banner" hidden></div>
+
+    <main>
+      <section class="col left">
+        <div class="card mode-card">
+          <h2>Inference mode <span class="cur" id="mode-source">telemetry</span></h2>
+          <div class="mode-head">
+            <span id="mode-badge" data-mode="NORMAL">NORMAL</span>
+            <span id="mode-reason">waiting for telemetry…</span>
+          </div>
+          <div id="mode-params" class="mono"></div>
+          <div class="counters">
+            <span>events <b id="counter-events">0 / 0</b></span>
+            <span>alerts <b id="counter-alerts">0</b></span>
+            <span>digest <b id="counter-digest">pending</b></span>
+            <span>calls <b id="counter-calls">0</b></span>
+          </div>
+        </div>
+
+        <div class="card">
+          <h2>KV cache % <span class="cur" id="kv-now">—</span></h2>
+          <div class="chart-box"><canvas id="chart-kv" data-points="0"></canvas></div>
+        </div>
+        <div class="card">
+          <h2>Queue waiting <span class="cur" id="waiting-now">—</span></h2>
+          <div class="chart-box"><canvas id="chart-waiting" data-points="0"></canvas></div>
+        </div>
+        <div class="card">
+          <h2>Tokens / sec <span class="cur" id="tokens-now">—</span></h2>
+          <div class="chart-box"><canvas id="chart-tokens" data-points="0"></canvas></div>
+        </div>
+      </section>
+
+      <section class="col right">
+        <div class="card">
+          <h2>Controls</h2>
+          <div class="controls">
+            <button id="btn-run">Run Night Watch</button>
+            <button id="btn-load">Simulate Load (30s)</button>
+            <button id="btn-egress">Attempt PHI Egress</button>
+          </div>
+          <div id="control-msg"></div>
+        </div>
+
+        <div class="card">
+          <h2>Egress attempt <span class="cur">PHI guardrail</span></h2>
+          <div class="egress" id="egress-result">
+            No attempt yet — press “Attempt PHI Egress” to watch the guardrail block a
+            PHI payload headed for a third-party host.
+          </div>
+        </div>
+
+        <div class="card">
+          <h2>Alerts feed <span class="cur" id="alerts-count">0 urgent</span></h2>
+          <ol class="feed" id="alerts-feed"></ol>
+        </div>
+
+        <div class="card">
+          <h2>Events feed <span class="cur" id="events-count">0 processed</span></h2>
+          <ul class="feed" id="events-feed"></ul>
+        </div>
+
+        <div class="card">
+          <h2>Morning digest <span class="cur" id="digest-state">pending</span></h2>
+          <div id="digest-panel" data-ready="false">
+            <span class="mono">digest not built yet — press “Run Night Watch”.</span>
+          </div>
+        </div>
+
+        <div class="card">
+          <h2>Call log <span class="cur" id="calls-state">0 calls</span></h2>
+          <div class="table-wrap">
+            <table id="call-log">
+              <thead>
+                <tr>
+                  <th class="num">#</th>
+                  <th>step</th>
+                  <th>mode</th>
+                  <th class="num">latency ms</th>
+                  <th class="num">prompt</th>
+                  <th class="num">completion</th>
+                  <th>status</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer>
+      <span id="conn">connecting…</span> · polls <code>/api/status</code>,
+      <code>/api/metrics</code>, <code>/api/events?since=</code> every 1s · assets served from this
+      host only (vendored Chart.js) · mock LLM + synthetic telemetry, zero egress.
+    </footer>
+
+    <script>
+      (function () {
+        "use strict";
+
+        var POLL_MS = 1000;
+        var MAX_POINTS = 120;
+
+        // Mirror of the live view, exposed so browser validators can assert real values.
+        var nw = {
+          status: null,
+          metrics: null,
+          alerts: [],
+          events: [],
+          calls: [],
+          digest: null,
+          egress: null,
+          eventsCursor: 0,
+          ticks: 0,
+          busy: false,
+          error: null,
+        };
+        window.nwState = nw;
+
+        function $(id) {
+          return document.getElementById(id);
+        }
+
+        function esc(value) {
+          return String(value === undefined || value === null ? "" : value)
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;")
+            .replace(/'/g, "&#39;");
+        }
+
+        function pad(value) {
+          return value < 10 ? "0" + value : String(value);
+        }
+
+        function clockText(seconds) {
+          if (!seconds) return "--:--:--";
+          var date = new Date(seconds * 1000);
+          return pad(date.getHours()) + ":" + pad(date.getMinutes()) + ":" + pad(date.getSeconds());
+        }
+
+        function timeOnly(iso) {
+          return typeof iso === "string" && iso.length >= 16 ? iso.slice(11, 16) : "--:--";
+        }
+
+        function num(value, digits) {
+          if (value === null || value === undefined || value !== value) return "—";
+          return Number(value).toFixed(digits);
+        }
+
+        function getJSON(url) {
+          return fetch(url, { headers: { Accept: "application/json" } }).then(function (res) {
+            if (!res.ok) throw new Error(url + " → HTTP " + res.status);
+            return res.json();
+          });
+        }
+
+        // ------------------------------------------------------------------ charts
+        var charts = {};
+        var chartError = null;
+
+        function chartConfig(color, label, suggestedMax) {
+          var config = {
+            type: "line",
+            data: {
+              labels: [],
+              datasets: [
+                {
+                  label: label,
+                  data: [],
+                  borderColor: color,
+                  backgroundColor: color + "33",
+                  borderWidth: 2,
+                  pointRadius: 0,
+                  fill: true,
+                  tension: 0.25,
+                },
+              ],
+            },
+            options: {
+              responsive: true,
+              maintainAspectRatio: false,
+              animation: false,
+              interaction: { mode: "index", intersect: false },
+              plugins: { legend: { display: false } },
+              scales: {
+                x: { display: false },
+                y: {
+                  beginAtZero: true,
+                  ticks: { color: "#8b98a9", maxTicksLimit: 4 },
+                  grid: { color: "rgba(255,255,255,0.06)" },
+                },
+              },
+            },
+          };
+          if (suggestedMax) config.options.scales.y.suggestedMax = suggestedMax;
+          return config;
+        }
+
+        function makeChart(canvasId, color, label, suggestedMax) {
+          try {
+            var canvas = $(canvasId);
+            if (!canvas || typeof Chart === "undefined") return null;
+            return new Chart(canvas, chartConfig(color, label, suggestedMax));
+          } catch (err) {
+            chartError = String(err && err.message ? err.message : err);
+            return null;
+          }
+        }
+
+        function applySeries(chart, canvasId, labels, data) {
+          var canvas = $(canvasId);
+          if (canvas) canvas.dataset.points = String(data.length);
+          if (!chart) return;
+          chart.data.labels = labels;
+          chart.data.datasets[0].data = data;
+          chart.update("none");
+        }
+
+        function renderMetrics(metrics) {
+          nw.metrics = metrics || null;
+          var history = (metrics && metrics.history) || [];
+          var tail = history.slice(-MAX_POINTS);
+          var labels = tail.map(function (sample) {
+            return clockText(sample.collected_at);
+          });
+          var kv = tail.map(function (s) {
+            return s.kv_cache_pct;
+          });
+          var waiting = tail.map(function (s) {
+            return s.waiting;
+          });
+          var tokens = tail.map(function (s) {
+            return s.tokens_per_s;
+          });
+
+          applySeries(charts.kv, "chart-kv", labels, kv);
+          applySeries(charts.waiting, "chart-waiting", labels, waiting);
+          applySeries(charts.tokens, "chart-tokens", labels, tokens);
+
+          var latest = (metrics && metrics.latest) || null;
+          $("kv-now").textContent = latest ? num(latest.kv_cache_pct, 1) + " %" : "—";
+          $("waiting-now").textContent = latest ? num(latest.waiting, 1) : "—";
+          $("tokens-now").textContent = latest ? num(latest.tokens_per_s, 1) + " tok/s" : "—";
+        }
+
+        // ------------------------------------------------------------------ status
+        function setFlag(id, on) {
+          var el = $(id);
+          if (!el) return;
+          el.classList.toggle("on", !!on);
+          el.title = on ? "active" : "off";
+        }
+
+        function renderStatus(status) {
+          nw.status = status;
+
+          var flags = status.flags || {};
+          setFlag("flag-mock-llm", flags.mock_llm);
+          setFlag("flag-mock-metrics", flags.mock_metrics);
+          setFlag("flag-phi", flags.phi_mode);
+
+          // Privacy badge: owned inference (allowlisted real host) / warning (real host
+          // outside the allowlist) / neutral (mock — no egress is possible by construction).
+          var egress = status.egress || {};
+          var badge = $("privacy-badge");
+          var state = "neutral";
+          var text = "MOCK — no egress possible";
+          if (!egress.is_mock && egress.owned) {
+            state = "owned";
+            text = "OWNED INFERENCE";
+          } else if (!egress.is_mock && !egress.owned) {
+            state = "warn";
+            text = "NON-OWNED ENDPOINT — non-PHI only";
+          }
+          badge.className = "privacy " + state;
+          badge.textContent = text;
+          badge.dataset.state = state;
+          badge.dataset.owned = String(!!egress.owned);
+          badge.dataset.isMock = String(!!egress.is_mock);
+          $("privacy-host").textContent = egress.endpoint_host ? "endpoint: " + egress.endpoint_host : "";
+
+          // Mode badge + reason + the params actually in force.
+          var mode = status.mode || "NORMAL";
+          var modeBadge = $("mode-badge");
+          modeBadge.textContent = mode;
+          modeBadge.dataset.mode = mode;
+          modeBadge.className = "mode-" + String(mode).toLowerCase();
+          $("mode-reason").textContent = status.reason || "";
+          $("mode-source").textContent = status.running ? "run in progress" : "live telemetry";
+          var params = status.params || {};
+          $("mode-params").textContent =
+            "max_tokens " +
+            params.max_tokens +
+            " · context_items " +
+            params.context_items +
+            " · batch_size " +
+            params.batch_size +
+            " · enable_thinking " +
+            params.enable_thinking;
+
+          var runState = status.run_state || "idle";
+          $("run-state").textContent = runState + (status.running ? " · running" : "");
+          $("counter-events").textContent =
+            (status.events_processed || 0) + " / " + (status.events_total || 0);
+          $("counter-alerts").textContent = String(status.alerts_count || 0);
+          $("counter-digest").textContent = status.digest_ready ? "ready" : "pending";
+          $("btn-run").disabled = !!status.running;
+
+          var banner = $("failure-banner");
+          if (runState === "failed") {
+            banner.hidden = false;
+            banner.textContent =
+              "Run failed — " +
+              (status.error || "unknown error") +
+              " · the app keeps answering: telemetry, egress guard and controls stay live.";
+          } else {
+            banner.hidden = true;
+            banner.textContent = "";
+          }
+
+          // A new run resets the server-side event sequence; follow it locally.
+          if ((status.events_processed || 0) < nw.eventsCursor) resetFeeds();
+        }
+
+        // ------------------------------------------------------------------- feeds
+        function resetFeeds() {
+          nw.eventsCursor = 0;
+          nw.events = [];
+          nw.alerts = [];
+          nw.calls = [];
+          nw.digest = null;
+          $("events-feed").innerHTML = "";
+          $("alerts-feed").innerHTML = "";
+          document.querySelector("#call-log tbody").innerHTML = "";
+          $("events-count").textContent = "0 processed";
+          $("alerts-count").textContent = "0 urgent";
+          $("calls-state").textContent = "0 calls";
+          $("digest-panel").dataset.ready = "false";
+          $("digest-panel").innerHTML =
+            '<span class="mono">digest not built yet — press “Run Night Watch”.</span>';
+          $("digest-state").textContent = "pending";
+        }
+
+        function renderEvents(items) {
+          if (!items.length) return;
+          var list = $("events-feed");
+          items.forEach(function (event) {
+            var li = document.createElement("li");
+            li.dataset.seq = String(event.seq);
+            li.dataset.kind = event.kind || "";
+            li.className = "ev-" + (event.urgency || "routine");
+            li.innerHTML =
+              '<span class="t">' +
+              esc(event.seq) +
+              " · " +
+              esc(timeOnly(event.timestamp)) +
+              "</span>" +
+              '<span class="tag ' +
+              esc(event.urgency || "routine") +
+              '">' +
+              esc(event.urgency || "routine") +
+              "</span>" +
+              '<span class="body"><span class="text">' +
+              esc(event.text) +
+              '</span><span class="summary">' +
+              esc(event.summary || "") +
+              (event.deferred ? ' <em>(deferred)</em>' : "") +
+              '</span><span class="why mono">' +
+              esc(event.source || "") +
+              " · " +
+              esc(event.id || "") +
+              "</span></span>";
+            list.appendChild(li);
+          });
+          $("events-count").textContent = nw.events.length + " processed";
+        }
+
+        function renderAlerts(alerts) {
+          var list = $("alerts-feed");
+          list.innerHTML = "";
+          alerts.forEach(function (alert, index) {
+            var li = document.createElement("li");
+            li.className = "alert-item";
+            li.dataset.seq = String(alert.seq);
+            li.innerHTML =
+              '<span class="t">' +
+              esc(alert.time || timeOnly(alert.timestamp)) +
+              '</span><span class="tag urgent">' +
+              esc(alert.kind || "urgent") +
+              '</span><span class="body"><span class="text"><span class="rank">#' +
+              (index + 1) +
+              "</span> " +
+              esc(alert.text) +
+              '</span><span class="summary">' +
+              esc(alert.summary || "") +
+              '</span><span class="why">' +
+              esc(alert.rationale || "") +
+              "</span></span>";
+            list.appendChild(li);
+          });
+          $("alerts-count").textContent = alerts.length + " urgent";
+        }
+
+        function renderCalls(calls) {
+          nw.calls = calls;
+          var tbody = document.querySelector("#call-log tbody");
+          tbody.innerHTML = "";
+          calls.forEach(function (call, index) {
+            var tr = document.createElement("tr");
+            tr.dataset.mode = call.mode || "";
+            tr.innerHTML =
+              '<td class="num">' +
+              (index + 1) +
+              "</td><td>" +
+              esc(call.step) +
+              "</td><td>" +
+              esc(call.mode) +
+              '</td><td class="num">' +
+              esc(call.latency_ms) +
+              '</td><td class="num">' +
+              esc(call.prompt_tokens) +
+              '</td><td class="num">' +
+              esc(call.completion_tokens) +
+              "</td><td>" +
+              (call.ok ? "ok" : '<span class="err">error</span>') +
+              "</td>";
+            tbody.appendChild(tr);
+          });
+          $("calls-state").textContent = calls.length + " calls";
+          $("counter-calls").textContent = String(calls.length);
+        }
+
+        function renderDigest(digest) {
+          var panel = $("digest-panel");
+          if (!digest || !digest.ready) {
+            panel.dataset.ready = "false";
+            $("digest-state").textContent = "pending";
+            return;
+          }
+          nw.digest = digest;
+          panel.dataset.ready = "true";
+          $("digest-state").textContent = "ready";
+
+          var html = '<div class="digest-header">' + esc(digest.header || "") + "</div>";
+          if (digest.overview) html += '<div class="digest-overview">' + esc(digest.overview) + "</div>";
+          var alerts = digest.urgent_alerts || [];
+          html += '<div class="digest-section"><h3>Urgent alerts</h3>';
+          if (alerts.length) {
+            html += "<ul>";
+            alerts.forEach(function (alert) {
+              html += "<li><b>" + esc(alert.time || timeOnly(alert.timestamp)) + "</b> — " + esc(alert.text) + "</li>";
+            });
+            html += "</ul>";
+          } else {
+            html += "<span class=\"mono\">none overnight</span>";
+          }
+          html += "</div>";
+
+          html += '<div class="digest-section"><h3>Tasks by owner</h3><ul>';
+          (digest.tasks || []).forEach(function (task) {
+            html += '<li class="digest-task"><strong>' + esc(task.sibling) + "</strong><ul>";
+            (task.tasks || []).forEach(function (item) {
+              html += "<li>" + esc(item) + "</li>";
+            });
+            html += "</ul></li>";
+          });
+          html += "</ul></div>";
+
+          var attention = digest.attention_items || [];
+          if (attention.length) {
+            html += '<div class="digest-section"><h3>Worth a look</h3><ul>';
+            attention.forEach(function (item) {
+              html += "<li>" + esc(item.text || item.kind || "") + "</li>";
+            });
+            html += "</ul></div>";
+          }
+
+          if (digest.deferred_items) {
+            html +=
+              '<div class="deferred">Deferred items: ' +
+              esc(digest.deferred_items.note || "") +
+              " (" +
+              esc(digest.deferred_items.count) +
+              " held by SURGE)</div>";
+          }
+          if (digest.markdown) {
+            html +=
+              '<div class="digest-section"><h3>Rendered digest</h3><pre class="mono" style="white-space:pre-wrap">' +
+              esc(digest.markdown) +
+              "</pre></div>";
+          }
+          panel.innerHTML = html;
+        }
+
+        // ------------------------------------------------------------------ actions
+        function setControl(message, kind) {
+          var el = $("control-msg");
+          el.textContent = message;
+          el.className = kind || "";
+        }
+
+        function renderEgress(result) {
+          nw.egress = result;
+          var box = $("egress-result");
+          var allowlist = (result.allowlist || []).join(", ");
+          if (result.blocked) {
+            box.className = "egress blocked";
+            box.dataset.blocked = "true";
+            box.innerHTML =
+              "<strong>EgressBlocked</strong> — <code>" +
+              esc(result.host) +
+              "</code> is not in the allowlist [" +
+              esc(allowlist) +
+              "]. PHI was refused before any network I/O: <strong>" +
+              esc(result.bytes_egressed) +
+              " bytes egressed</strong>. Nothing left this machine.";
+          } else {
+            box.className = "egress";
+            box.dataset.blocked = "false";
+            box.innerHTML =
+              "No block returned (host " +
+              esc(result.host) +
+              " is allowlisted or the endpoint is mock): " +
+              esc(result.message || "");
+          }
+        }
+
+        function startRun() {
+          fetch("/api/run", { method: "POST" })
+            .then(function (res) {
+              return res
+                .json()
+                .catch(function () {
+                  return {};
+                })
+                .then(function (body) {
+                  if (res.status === 409) {
+                    setControl("run already active: " + (body.detail || "in progress"), "warn");
+                  } else if (!res.ok) {
+                    setControl("start failed: HTTP " + res.status, "warn");
+                  } else {
+                    resetFeeds();
+                    setControl("run started · " + body.run_id, "ok");
+                  }
+                });
+            })
+            .catch(function (err) {
+              setControl("start failed: " + err.message, "warn");
+            })
+            .then(function () {
+              return tick();
+            });
+        }
+
+        function simulateLoad() {
+          fetch("/api/simulate-load", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ duration_s: 30, intensity: 1.0 }),
+          })
+            .then(function (res) {
+              return res
+                .json()
+                .catch(function () {
+                  return {};
+                })
+                .then(function (body) {
+                  if (res.ok) {
+                    setControl(
+                      "load window started — " +
+                        body.duration_s +
+                        "s at intensity " +
+                        body.intensity +
+                        " · watch the badge walk CONSERVE → SURGE",
+                      "ok",
+                    );
+                  } else {
+                    setControl("load failed: HTTP " + res.status, "warn");
+                  }
+                });
+            })
+            .catch(function (err) {
+              setControl("load failed: " + err.message, "warn");
+            })
+            .then(function () {
+              return tick();
+            });
+        }
+
+        function attemptEgress() {
+          var box = $("egress-result");
+          box.hidden = false;
+          box.className = "egress pending";
+          box.textContent = "attempting a PHI completion against api.openai.com …";
+          fetch("/api/egress-demo", { method: "POST" })
+            .then(function (res) {
+              return res.json();
+            })
+            .then(renderEgress)
+            .catch(function (err) {
+              box.className = "egress blocked";
+              box.textContent = "egress attempt failed: " + err.message;
+            });
+        }
+
+        // ------------------------------------------------------------------ polling
+        function setConn(message, kind) {
+          var el = $("conn");
+          el.textContent = message;
+          el.className = kind || "";
+        }
+
+        function tick() {
+          if (nw.busy) return Promise.resolve();
+          nw.busy = true;
+          nw.ticks += 1;
+          return Promise.all([getJSON("/api/status"), getJSON("/api/metrics")])
+            .then(function (pair) {
+              renderStatus(pair[0]);
+              renderMetrics(pair[1]);
+              return getJSON("/api/events?since=" + nw.eventsCursor);
+            })
+            .then(function (events) {
+              if (events.length) {
+                nw.events = nw.events.concat(events);
+                nw.eventsCursor = events[events.length - 1].seq;
+                renderEvents(events);
+              }
+              return Promise.all([
+                getJSON("/api/alerts"),
+                getJSON("/api/calls"),
+                getJSON("/api/digest"),
+              ]);
+            })
+            .then(function (rest) {
+              nw.alerts = rest[0];
+              renderAlerts(rest[0]);
+              renderCalls(rest[1]);
+              renderDigest(rest[2]);
+              nw.error = null;
+              setConn("connected · tick " + nw.ticks + " · localhost only", "ok");
+            })
+            .catch(function (err) {
+              nw.error = String(err && err.message ? err.message : err);
+              setConn("connection problem: " + nw.error, "bad");
+            })
+            .then(function () {
+              nw.busy = false;
+            });
+        }
+
+        function boot() {
+          charts.kv = makeChart("chart-kv", "#4dd4ac", "KV cache %", 100);
+          charts.waiting = makeChart("chart-waiting", "#ffb454", "queue waiting");
+          charts.tokens = makeChart("chart-tokens", "#7aa2ff", "tokens/s");
+          window.nwCharts = charts;
+          nw.chartError = chartError;
+
+          $("btn-run").addEventListener("click", startRun);
+          $("btn-load").addEventListener("click", simulateLoad);
+          $("btn-egress").addEventListener("click", attemptEgress);
+          $("egress-result").hidden = false;
+
+          tick();
+          setInterval(tick, POLL_MS);
+        }
+
+        if (document.readyState === "loading") {
+          document.addEventListener("DOMContentLoaded", boot);
+        } else {
+          boot();
+        }
+      })();
+    </script>
+  </body>
+</html>

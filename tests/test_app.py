@@ -16,6 +16,8 @@ no sockets, no outbound inference. Covers VAL-API-001..007 and VAL-LOAD-001:
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import re
 import socket
 import time
 from typing import Any
@@ -27,6 +29,29 @@ from app.app import create_app
 from config import Settings
 from core.llm import LLMClient
 from inference.metrics import MockMetricsSource
+
+#: sha256 of the vendored Chart.js 4.5.1 UMD build (see architecture.md §app/dashboard.html).
+CHART_UMD_SHA256 = "ecc3cd1eeb8c34d2178e3f59fd63ec5a3d84358c11730af0b9958dc886d7652a"
+
+#: Every element the dashboard JavaScript binds to (and the browser flow asserts on).
+DASHBOARD_ELEMENT_IDS = (
+    "btn-run",
+    "btn-load",
+    "btn-egress",
+    "chart-kv",
+    "chart-waiting",
+    "chart-tokens",
+    "mode-badge",
+    "mode-reason",
+    "mode-params",
+    "privacy-badge",
+    "failure-banner",
+    "alerts-feed",
+    "events-feed",
+    "digest-panel",
+    "call-log",
+    "egress-result",
+)
 
 
 def _settings(**overrides: str) -> Settings:
@@ -451,3 +476,60 @@ def test_metrics_poller_starts_and_stops_with_the_app() -> None:
 
     assert sampled_and_running is True
     assert leaked == []
+
+
+def test_dashboard_serves_the_controls_with_local_assets_only() -> None:
+    """VAL-DASH-001/002: `GET /` is the real dashboard — controls bound, zero external URLs."""
+    app = create_app(settings=_settings())
+
+    async def scenario() -> tuple[int, str, str]:
+        async with _client(app) as client:
+            page = await client.get("/")
+            asset = await client.get("/static/chart.umd.js")
+            return page.status_code, page.text, asset.headers.get("content-type", "")
+
+    status, html, asset_type = asyncio.run(scenario())
+
+    assert status == 200
+    assert "<title>Night Watch" in html
+    for label in ("Run Night Watch", "Simulate Load (30s)", "Attempt PHI Egress"):
+        assert label in html, f"missing control label: {label}"
+    for element_id in DASHBOARD_ELEMENT_IDS:
+        assert f'id="{element_id}"' in html, f"missing dashboard element: #{element_id}"
+
+    # The polling layer drives all three documented endpoints, plus the panel feeds.
+    for path in ("/static/chart.umd.js", "/api/status", "/api/metrics", "/api/events?since="):
+        assert path in html, f"dashboard does not reference {path}"
+
+    # Offline guarantee: every asset reference is local or a data: URI, no absolute URL anywhere.
+    refs = re.findall(r'(?:src|href)="([^"]+)"', html)
+    assert refs, "expected the vendored chart asset reference"
+    for ref in refs:
+        assert ref.startswith("/") or ref.startswith("data:"), f"non-local asset reference: {ref}"
+    assert "http://" not in html
+    assert "https://" not in html
+    assert "//cdn" not in html
+    assert "javascript:load" not in asset_type  # the chart asset endpoint is static, not a stub
+
+
+def test_vendored_chartjs_serves_at_the_verified_hash() -> None:
+    """VAL-DASH-002: `/static/chart.umd.js` is the vendored Chart.js 4.5.1 build, byte-exact."""
+    app = create_app(settings=_settings())
+
+    async def scenario() -> tuple[int, int, str, str]:
+        async with _client(app) as client:
+            response = await client.get("/static/chart.umd.js")
+            body = response.content
+            return (
+                response.status_code,
+                len(body),
+                hashlib.sha256(body).hexdigest(),
+                response.headers.get("content-type", ""),
+            )
+
+    status, size, digest, content_type = asyncio.run(scenario())
+
+    assert status == 200
+    assert size == 208_518
+    assert digest == CHART_UMD_SHA256
+    assert "javascript" in content_type
