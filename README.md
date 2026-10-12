@@ -6,7 +6,9 @@ Mom (Ludmila, 81) — a missed evening dose, bathroom trips, a confusion episode
 owner-assigned tasks for her children, **Anna** and **Pavel**, urgent alerts first.
 
 Built for the HackerSquad + Akamai hackathon _Build AI agents that own their inference_
-(AWS Builder Loft, SF · Mon Oct 12 2026). One Qwen3-4B, served by vLLM on an Akamai Cloud GPU.
+(AWS Builder Loft, SF · Mon Oct 12 2026). The model is served by vLLM on an Akamai Cloud (Linode)
+instance we provision ourselves — Qwen3-4B on a GPU plan, or Qwen3-1.7B on vLLM's CPU build when
+GPU quota is unavailable (which is what the committed real-run screenshot shows).
 
 It owns its inference in three visible ways: a **PHI egress guardrail**, a **self-tuning loop**
 driven by the agent's own vLLM telemetry, and a **live inference dashboard**. Nothing leaves the
@@ -267,8 +269,31 @@ and do this in a terminal there:
 - **Deterministic.** Dataset seed 42 plus canned replies means the same events, alerts, and digest
   on every run — reproducible for judges, and the Wi-Fi-death insurance for the live demo.
 - **Clean tree at handoff.** All work is committed; `git status --short` is empty.
-- **Screenshot.** `docs/dashboard-mock.png` — the dashboard in mock mode after a run (digest ready,
-  mode telemetry, call log). Re-shoot it on site against the sandbox endpoint per the checklist.
+- **Screenshots.** `docs/dashboard-owned-cpu.jpg` — the dashboard after a real 40-event run against
+  our own Linode vLLM box (Qwen3-1.7B, CPU build; 55 calls, 0 errors, policy stepped SURGE → CONSERVE
+  on live TTFT). `docs/dashboard-mock.png` — the same dashboard in offline mock mode.
+
+## Own box on Akamai Cloud (no sandbox needed)
+
+`deploy/` holds two cloud-init files for a Linode that serves vLLM bound to **localhost only**;
+you reach it through an SSH tunnel, so PHI never crosses the public internet:
+
+- `deploy/linode-gpu-cloud-init.yaml` — RTX 4000 Ada plan, Qwen3-4B (needs GPU quota on the account).
+- `deploy/linode-cpu-cloud-init.yaml` — any Shared/Dedicated plan with ≥ 16 GB RAM, Qwen3-1.7B on
+  vLLM's CPU image. Slow (≈ 8 s per classification) but real `/metrics`, which is exactly what makes
+  the SURGE/CONSERVE transitions visible.
+
+Then, with no env-file edits:
+
+```bash
+ssh -N -L 8000:127.0.0.1:8000 root@<linode-ip>
+LLM_BASE_URL=http://127.0.0.1:8000/v1 LLM_MODEL=<id from /v1/models> \
+  VLLM_METRICS_URL=http://127.0.0.1:8000/metrics uv run uvicorn app.app:app --host 127.0.0.1 --port 8765
+```
+
+Known limit of the 1.7B model: summaries occasionally borrow details from neighbouring events in
+the context window. The keyword safety net still forces the correct severity; the 4B GPU path
+fixes the wording.
 
 ## Prep disclosure
 
