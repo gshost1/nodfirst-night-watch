@@ -1,0 +1,61 @@
+#cloud-config
+# Night Watch owned-inference box: one Linode GPU (RTX 4000 Ada, 20 GB) serving Qwen/Qwen3-4B
+# with vLLM, bound to localhost only. Reach it through an SSH tunnel; nothing is exposed publicly.
+# Paste this into "User Data" when creating the Linode (Ubuntu 24.04 LTS image).
+package_update: true
+package_upgrade: false
+packages:
+  - ca-certificates
+  - curl
+  - gnupg
+  - ubuntu-drivers-common
+write_files:
+  - path: /opt/vllm/run.sh
+    permissions: "0755"
+    content: |
+      #!/bin/bash
+      exec docker run --rm --name vllm --gpus all \
+        -p 127.0.0.1:8000:8000 \
+        -v /opt/vllm/hf:/root/.cache/huggingface \
+        --ipc=host \
+        vllm/vllm-openai:latest \
+        --model Qwen/Qwen3-4B \
+        --max-model-len 8192 \
+        --gpu-memory-utilization 0.90 \
+        --reasoning-parser qwen3 \
+        --default-chat-template-kwargs '{"enable_thinking": false}'
+  - path: /etc/systemd/system/vllm.service
+    content: |
+      [Unit]
+      Description=vLLM Qwen3-4B (localhost only)
+      After=docker.service network-online.target
+      Requires=docker.service
+      [Service]
+      ExecStart=/opt/vllm/run.sh
+      ExecStop=/usr/bin/docker stop vllm
+      Restart=always
+      RestartSec=10
+      [Install]
+      WantedBy=multi-user.target
+runcmd:
+  # Docker
+  - install -m 0755 -d /etc/apt/keyrings
+  - curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+  - echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu noble stable" > /etc/apt/sources.list.d/docker.list
+  # NVIDIA container toolkit
+  - curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey | gpg --dearmor -o /etc/apt/keyrings/nvidia-container-toolkit.gpg
+  - curl -sL https://nvidia.github.io/libnvidia-container/stable/deb/nvidia-container-toolkit.list | sed 's#deb https://#deb [signed-by=/etc/apt/keyrings/nvidia-container-toolkit.gpg] https://#g' > /etc/apt/sources.list.d/nvidia-container-toolkit.list
+  - apt-get update
+  - apt-get install -y docker-ce docker-ce-cli containerd.io nvidia-container-toolkit
+  # NVIDIA driver (server branch, no desktop deps)
+  - apt-get install -y nvidia-driver-570-server
+  - nvidia-ctk runtime configure --runtime=docker
+  - systemctl enable docker
+  - systemctl enable vllm
+  # Pull the image now so the post-reboot start is fast
+  - docker pull vllm/vllm-openai:latest || true
+  - touch /var/lib/cloud/instance/nightwatch-stage1-done
+power_state:
+  mode: reboot
+  message: "Night Watch: rebooting to load the NVIDIA driver; vllm.service starts on boot"
+  timeout: 30

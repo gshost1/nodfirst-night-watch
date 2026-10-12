@@ -1,0 +1,47 @@
+#cloud-config
+# Night Watch owned-inference box, CPU fallback: a Dedicated CPU Linode serving Qwen/Qwen3-1.7B
+# with vLLM's CPU build, bound to localhost only. Reach it through an SSH tunnel; nothing is public.
+# Paste into "User Data" when creating the Linode (Ubuntu 24.04 LTS, Shared Linode 8 GB or larger).
+package_update: true
+packages: [ca-certificates, curl, gnupg]
+write_files:
+  - path: /opt/vllm/run.sh
+    permissions: "0755"
+    content: |
+      #!/bin/bash
+      exec docker run --rm --name vllm \
+        -p 127.0.0.1:8000:8000 \
+        -v /opt/vllm/hf:/root/.cache/huggingface \
+        -e VLLM_CPU_KVCACHE_SPACE=3 \
+        -e VLLM_CPU_OMP_THREADS_BIND=all \
+        --ipc=host --privileged=true \
+        public.ecr.aws/q9t5s3a7/vllm-cpu-release-repo:v0.29.0 \
+        --model Qwen/Qwen3-1.7B \
+        --dtype bfloat16 \
+        --max-model-len 3072 \
+        --max-num-seqs 4 \
+        --reasoning-parser qwen3 \
+        --default-chat-template-kwargs '{"enable_thinking": false}'
+  - path: /etc/systemd/system/vllm.service
+    content: |
+      [Unit]
+      Description=vLLM CPU Qwen3-1.7B (localhost only)
+      After=docker.service network-online.target
+      Requires=docker.service
+      [Service]
+      ExecStart=/opt/vllm/run.sh
+      ExecStop=/usr/bin/docker stop vllm
+      Restart=always
+      RestartSec=10
+      [Install]
+      WantedBy=multi-user.target
+runcmd:
+  - install -m 0755 -d /etc/apt/keyrings
+  - curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+  - echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu noble stable" > /etc/apt/sources.list.d/docker.list
+  - apt-get update
+  - apt-get install -y docker-ce docker-ce-cli containerd.io
+  - systemctl enable --now docker
+  - docker pull public.ecr.aws/q9t5s3a7/vllm-cpu-release-repo:v0.29.0
+  - systemctl enable --now vllm
+  - touch /var/lib/cloud/instance/nightwatch-cpu-done
