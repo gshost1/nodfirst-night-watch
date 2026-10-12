@@ -1,0 +1,165 @@
+{
+  "seed": 42,
+  "events": [
+    {
+      "id": "event-01",
+      "timestamp": "2026-10-11T21:00:00",
+      "source": "smart_speaker",
+      "kind": "mood_check",
+      "text": "Mom says she feels settled and ready for a quiet evening.",
+      "urgency": "routine"
+    },
+    {
+      "id": "event-03",
+      "timestamp": "2026-10-11T21:15:00",
+      "source": "med_box",
+      "kind": "missed_dose",
+      "text": "Evening metformin dose appears missed: the med box shows the compartment still closed.",
+      "urgency": "urgent"
+    },
+    {
+      "id": "event-04",
+      "timestamp": "2026-10-11T21:27:00",
+      "source": "bathroom_sensor",
+      "kind": "bathroom_trip",
+      "text": "Bathroom sensor recorded a trip; Mom returned to her room.",
+      "urgency": "attention"
+    },
+    {
+      "id": "event-05",
+      "timestamp": "2026-10-11T21:42:00",
+      "source": "smart_speaker",
+      "kind": "mood_check",
+      "text": "Mom says she is comfortable and in a good mood.",
+      "urgency": "routine"
+    },
+    {
+      "id": "event-07",
+      "timestamp": "2026-10-11T22:05:00",
+      "source": "bathroom_sensor",
+      "kind": "bathroom_trip",
+      "text": "Bathroom sensor recorded a trip during the night.",
+      "urgency": "attention"
+    },
+    {
+      "id": "event-09",
+      "timestamp": "2026-10-11T22:32:00",
+      "source": "sibling_message",
+      "kind": "family_check_in",
+      "text": "Pavel sends Mom a good-night message and offers to help tomorrow.",
+      "urgency": "routine"
+    },
+    {
+      "id": "event-11",
+      "timestamp": "2026-10-11T23:01:00",
+      "source": "bathroom_sensor",
+      "kind": "bathroom_trip",
+      "text": "Bathroom sensor recorded a trip and a return to the bedroom.",
+      "urgency": "attention"
+    },
+    {
+      "id": "event-12",
+      "timestamp": "2026-10-11T23:12:00",
+      "source": "sibling_message",
+      "kind": "family_check_in",
+      "text": "Anna messages that she will check on Mom after breakfast.",
+      "urgency": "routine"
+    },
+    {
+      "id": "event-14",
+      "timestamp": "2026-10-11T23:39:00",
+      "source": "smart_speaker",
+      "kind": "confusion_episode",
+      "text": "Mom asks where her mother is and sounds confused about being at home.",
+      "urgency": "urgent"
+    },
+    {
+      "id": "event-15",
+      "timestamp": "2026-10-11T23:55:00",
+      "source": "smart_speaker",
+      "kind": "mood_check",
+      "text": "Mom says she feels calmer after a brief conversation.",
+      "urgency": "routine"
+    },
+    {
+      "id": "event-16",
+      "timestamp": "2026-10-12T00:12:00",
+      "source": "bathroom_sensor",
+      "kind": "bathroom_trip",
+      "text": "Bathroom sensor recorded a trip shortly after midnight.",
+      "urgency": "attention"
+    },
+    {
+      "id": "event-17",
+      "timestamp": "2026-10-12T00:29:00",
+      "source": "sibling_message",
+      "kind": "family_check_in",
+      "text": "Pavel messages that he will be available by phone in the morning.",
+      "urgency": "routine"
+    },
+    {
+      "id": "event-19",
+      "timestamp": "2026-10-12T01:04:00",
+      "source": "smart_speaker",
+      "kind": "check_in",
+      "text": "Mom answers the check-in and says she is doing fine.",
+      "urgency": "routine"
+    },
+    {
+      "id": "event-20",
+      "timestamp": "2026-10-12T01:21:00",
+      "source": "bathroom_sensor",
+      "kind": "bathroom_trip",
+      "text": "Bathroom trip recorded: Mom says the hall night-light was hard to find.",
+      "urgency": "attention"
+    },
+    {
+      "id": "event-24",
+      "timestamp": "2026-10-12T02:11:00",
+      "source": "med_box",
+      "kind": "device_status",
+      "text": "Med box status: the morning compartment is prepared for breakfast time.",
+      "urgency": "attention"
+    },
+    {
+      "id": "event-25",
+      "timestamp": "2026-10-12T02:27:00",
+      "source": "bathroom_sensor",
+      "kind": "bathroom_trip",
+      "text": "Bathroom door sensor recorded another overnight trip.",
+      "urgency": "attention"
+    },
+    {
+      "id": "event-27",
+      "timestamp": "2026-10-12T03:12:00",
+      "source": "smart_speaker",
+      "kind": "possible_fall",
+      "text": "Transcript: a loud thud, then no verbal response to \"Mom, are you okay?\" Possible fall.",
+      "urgency": "urgent"
+    },
+    {
+      "id": "event-29",
+      "timestamp": "2026-10-12T03:39:00",
+      "source": "smart_speaker",
+      "kind": "routine_chatter",
+      "text": "Mom asks the time and says she would like to rest a little longer.",
+      "urgency": "routine"
+    },
+    {
+      "id": "event-33",
+      "timestamp": "2026-10-12T04:52:00",
+      "source": "smart_speaker",
+      "kind": "routine_chatter",
+      "text": "Mom asks whether it will be sunny later this morning.",
+      "urgency": "routine"
+    },
+    {
+      "id": "event-40",
+      "timestamp": "2026-10-12T06:30:00",
+      "source": "smart_speaker",
+      "kind": "check_in",
+      "text": "End-of-watch check-in: Mom says she is comfortable and ready for breakfast.",
+      "urgency": "routine"
+    }
+  ]
+}
