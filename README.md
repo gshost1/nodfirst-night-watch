@@ -8,7 +8,15 @@ owner-assigned tasks for her children, **Anna** and **Pavel**, urgent alerts fir
 Built for the HackerSquad + Akamai hackathon _Build AI agents that own their inference_
 (AWS Builder Loft, SF · Mon Oct 12 2026). The model is served by vLLM on an Akamai Cloud (Linode)
 instance we provision ourselves — Qwen3-4B on a GPU plan, or Qwen3-1.7B on vLLM's CPU build when
-GPU quota is unavailable (which is what the committed real-run screenshot shows).
+GPU quota is unavailable.
+
+**Real GPU run (on site, Oct 12):** Qwen3-4B on vLLM in the Akamai GPU sandbox (Nvidia RTX Pro
+4000): 40/40 events, 5 urgent alerts with the 03:12 possible fall first, every PHI call on the
+`vllm` host, 1 third-party egress attempt blocked, 0 bytes out. Time to first token ~0.07 s; a
+30 s load burst left KV cache at 1.5 %, so the policy correctly stayed `NORMAL` (on our CPU box the
+same agent stepped SURGE → CONSERVE). Screenshot: `docs/dashboard-gpu.jpg`.
+
+![Night Watch on the Akamai GPU](docs/dashboard-gpu.jpg)
 
 It owns its inference in three visible ways: a **PHI egress guardrail**, a **self-tuning loop**
 driven by the agent's own vLLM telemetry, and a **live inference dashboard**. Nothing leaves the
@@ -269,7 +277,9 @@ and do this in a terminal there:
 - **Deterministic.** Dataset seed 42 plus canned replies means the same events, alerts, and digest
   on every run — reproducible for judges, and the Wi-Fi-death insurance for the live demo.
 - **Clean tree at handoff.** All work is committed; `git status --short` is empty.
-- **Screenshots.** `docs/dashboard-owned-cpu.jpg` — the dashboard after a real 40-event run against
+- **Screenshots.** `docs/dashboard-gpu.jpg` — real run on the Akamai GPU sandbox (Qwen3-4B, vLLM),
+  captured with `scripts/gpu_demo_snapshots.sh` + `scripts/inline_snapshot.py` because the sandbox
+  only exposes JupyterLab. `docs/dashboard-owned-cpu.jpg` — the dashboard after a real 40-event run against
   our own Linode vLLM box (Qwen3-1.7B, CPU build; 55 calls, 0 errors, policy stepped SURGE → CONSERVE
   on live TTFT). `docs/dashboard-mock.png` — the same dashboard in offline mock mode.
 
