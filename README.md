@@ -28,6 +28,22 @@ three safety-critical alerts intact (03:12 fall first, then the confusion episod
 It flagged one bathroom trip instead of two: those are borderline calls left to the model, not the
 keyword safety net, and the smaller SURGE budget made it more conservative.
 
+**Urgent fast lane (built on site from that measurement).** In the storm above, alerts only
+appeared once the queue drained. Now every run pre-scans all events with the deterministic safety
+net and publishes urgent alerts before the first model call; the model enriches them in place.
+Re-run on the real GPU at 98 % KV cache with 169 requests waiting: the **03:12 fall alert was
+raised at 0 ms** (`fast_lane: true`, `raised_ms: 0`) while the model had processed 0 of 40 events.
+Screenshot: `docs/dashboard-gpu-fastlane.jpg`.
+
+![Fall alert raised by the fast lane while the GPU is saturated](docs/dashboard-gpu-fastlane.jpg)
+
+**Urgent-recall eval on the real GPU** (`eval/run_eval.py`, Qwen3-4B on vLLM, 20 labeled events):
+
+| Mode | Urgent recall | Calls | Tokens | Wall time |
+|---|---|---|---|---|
+| NORMAL | 1.000 | 41 | 16,794 | 45.3 s |
+| SURGE | 1.000 | 26 | 5,848 (−65 %) | 24.2 s (−47 %) |
+
 ![Night Watch switching to SURGE on real Akamai GPU telemetry](docs/dashboard-gpu-surge.jpg)
 
 It owns its inference in three visible ways: a **PHI egress guardrail**, a **self-tuning loop**
